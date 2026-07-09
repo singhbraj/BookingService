@@ -16,6 +16,7 @@ hotelId Int
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
 bookingAmount Int
+totalGuests Int
 status BookingStatus
 
 }
