@@ -1,27 +1,41 @@
 import { confirmBooking, createIdempotencyKey, finalizeIdempotencyKey, getIdempotencyKeyWithLock } from "../repositories/booking.repository";
 import { generateIdempotencyKey } from "../utils/helpers/generateIdempotencyKey";
 import { createBooking } from "../repositories/booking.repository";
-import { BadRequestError, NotFoundError } from "../utils/errors/app.error";
+import { BadRequestError, InternalServerError, NotFoundError } from "../utils/errors/app.error";
 import { CreateBookingDTO } from "../dto/booking.dto";
 import prisma from "../prisma/client";
+import { redlock } from "../config/redis.config";
+import { serverConfig } from "../config";
 
 
 export async function createBookingService(createBookingDTO: CreateBookingDTO){
-  const booking = await createBooking({
-    userId: createBookingDTO.userId,
-    hotelId: createBookingDTO.hotelId,
-    totalGuests: createBookingDTO.totalGuests,
-    bookingAmount: createBookingDTO.bookingAmount,
-  });
+   
+    const ttl = serverConfig.LOCK_TTL;
+    const bookingResource = `hotel:${createBookingDTO.hotelId}`;
 
-  const idempotencyKey = generateIdempotencyKey ();
+    //acquire lock
 
-  await createIdempotencyKey(idempotencyKey, booking.id);
+    try{
+        await redlock.acquire([bookingResource], ttl);
+        const booking = await createBooking({
+            userId: createBookingDTO.userId,
+            hotelId: createBookingDTO.hotelId,
+            totalGuests: createBookingDTO.totalGuests,
+            bookingAmount: createBookingDTO.bookingAmount,
+        });
+        const idempotencyKey = generateIdempotencyKey ();
+        await createIdempotencyKey(idempotencyKey, booking.id);
+        return {    
+            bookingId: booking.id,
+            idempotencyKey: idempotencyKey,
+        };
+    }catch(error){
+        throw new InternalServerError(`Failed to acquire lock for resource:${bookingResource} with error:${error}`);
+    }
+  
+      
 
-  return {
-    bookingId: booking.id,
-    idempotencyKey: idempotencyKey,
-  };
+  
 }
 
 
